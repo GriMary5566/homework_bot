@@ -27,11 +27,11 @@ handler.setFormatter(formatter)
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-ENDPOINT = os.getenv('ENDPOINT')
+
 
 RETRY_TIME = 600
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
-
+ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 
 HOMEWORK_STATUSES = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',

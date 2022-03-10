@@ -1,0 +1,2 @@
+class HomeworkError(Exception):
+    pass

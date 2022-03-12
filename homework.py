@@ -1,11 +1,10 @@
+import json
 import logging
 import os
 import sys
 import time
-from email.errors import MessageError
 from http import HTTPStatus
 from typing import Dict
-from xmlrpc.client import ResponseError
 
 import requests
 import telegram
@@ -47,7 +46,7 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
         logger.info(f'Бот отправил сообщение "{message}".')
-    except MessageError:
+    except telegram.TelegramError:
         logger.error(f'Бот не смог отправить сообщение "{message}".')
 
 
@@ -63,53 +62,57 @@ def get_api_answer(current_timestamp):
                 f'Сбой в работе программы: Эндпоинт {ENDPOINT} недоступен.'
                 f'Код ответа API: {status}'
             )
-            raise ResponseError(f'Эндпоинт {ENDPOINT} недоступен.')
+            raise requests.exceptions.HTTPError(
+                f'Эндпоинт {ENDPOINT} недоступен.'
+            )
         return response.json()
-    except Exception as error:
+    except json.decoder.JSONDecodeError:
+        logger.error('Формат ответа API отличается от JSON')
+        raise Exception('Формат ответа API отличается от JSON')
+    except requests.exceptions.RequestException as error:
         logger.error(f'Ошибка при запросе к основному API: {error}')
-        raise ResponseError(f'Ошибка при запросе к основному API: {error}')
+        raise Exception(f'Ошибка при запросе к основному API: {error}')
 
 
 def check_response(response):
     """Проверка ответа API на корректность."""
-    try:
-        if type(response) != dict:
-            raise TypeError('Ответ API имеет тип данных, отличный от dict')
-        homeworks = response.get('homeworks')
-        if homeworks is None:
-            raise KeyError('Ответ API не содержит ключ "homeworks"')
-        if type(homeworks) != list:
-            raise TypeError('Значение ключа "homeworks" не является списком')
-        return homeworks
-    except KeyError as error:
-        logger.error(f'Сбой в работе программы: {error}')
-        raise KeyError(error)
-    except TypeError as error:
-        logger.error(f'Сбой в работе программы: {error}')
-        raise TypeError(error)
+    if type(response) is not dict:
+        logger.error(
+            'Сбой в работе программы: Ответ API имеет тип данных, '
+            'отличный от dict'
+        )
+        raise TypeError('Ответ API имеет тип данных, отличный от dict')
+    homeworks = response.get('homeworks')
+    if homeworks is None:
+        logger.error(
+            'Сбой в работе программы: Ответ API не содержит ключ "homeworks"'
+        )
+        raise KeyError('Ответ API не содержит ключ "homeworks"')
+    if type(homeworks) is not list:
+        logger.error(
+            'Сбой в работе программы: Значение ключа "homeworks" '
+            'не является списком'
+        )
+        raise TypeError('Значение ключа "homeworks" не является списком')
+    return homeworks
 
 
 def parse_status(homework):
     """Проверка статуса домашней работы."""
-    try:
-        homework_name = homework.get('homework_name')
-        homework_status = homework.get('status')
-        if homework_status not in HOMEWORK_STATUSES:
-            raise KeyError(f'Статус работы {homework_status} недопустим')
-        if homework_name in PREV_HOMEWORK_STATUSES:
-            if PREV_HOMEWORK_STATUSES[homework_name] == homework_status:
-                raise exceptions.HomeworkError(
-                    f'Статус работы {homework_name} не изменился'
-                )
-        PREV_HOMEWORK_STATUSES[homework_name] = homework_status
+    homework_name = homework.get('homework_name')
+    homework_status = homework.get('status')
+    if homework_status not in HOMEWORK_STATUSES:
+        logger.error(f'Статус работы {homework_status} недопустим')
+        raise KeyError(f'Статус работы {homework_status} недопустим')
+    if homework_name in PREV_HOMEWORK_STATUSES:
+        if PREV_HOMEWORK_STATUSES[homework_name] == homework_status:
+            raise exceptions.HomeworkError(
+                f'Статус работы {homework_name} не изменился'
+            )
+    PREV_HOMEWORK_STATUSES[homework_name] = homework_status
 
-        verdict = HOMEWORK_STATUSES.get(homework_status)
-        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
-    except KeyError as error:
-        logger.error(error)
-        raise KeyError(error)
-    except Exception as error:
-        raise exceptions.HomeworkError(error)
+    verdict = HOMEWORK_STATUSES.get(homework_status)
+    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens():
@@ -128,7 +131,7 @@ def check_tokens():
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        raise NameError('Проверьте наличие обязательных переменных окружения!')
+        sys.exit()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
@@ -138,9 +141,8 @@ def main():
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
             if len(homeworks) != 0:
-                for homework in homeworks:
-                    message = parse_status(homework)
-                    send_message(bot, message)
+                message = parse_status(homeworks[0])
+                send_message(bot, message)
             current_timestamp = response.get('current_date')
         except exceptions.HomeworkError as error:
             logger.debug(error)
